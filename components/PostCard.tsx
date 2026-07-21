@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Post, Comment, CreateCommentInput } from '@/types/post';
 import { getInitials, getAvatarColor, getRelativeTime } from '@/lib/utils';
 import { CommentSection } from '@/components/CommentSection';
-import { Heart, Trash2, X, MessageSquare } from 'lucide-react';
+import { Heart, Trash2, X, MessageSquare, Pencil, Check } from 'lucide-react';
 
 interface PostCardProps {
   post: Post;
@@ -15,6 +15,8 @@ interface PostCardProps {
   onAddComment: (input: CreateCommentInput) => Promise<boolean>;
   onDeleteComment: (commentId: string, postId: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
+  onEditPost: (postId: string, newMessage: string) => Promise<boolean>;
+  onEditComment: (commentId: string, postId: string, newMessage: string) => Promise<boolean>;
 }
 
 export const PostCard: React.FC<PostCardProps> = ({
@@ -26,11 +28,18 @@ export const PostCard: React.FC<PostCardProps> = ({
   onAddComment,
   onDeleteComment,
   onDelete,
+  onEditPost,
+  onEditComment,
 }) => {
   const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editMessage, setEditMessage] = useState(post.message);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const avatarColor = getAvatarColor(post.name);
   const relativeTime = getRelativeTime(post.created_at);
@@ -50,6 +59,25 @@ export const PostCard: React.FC<PostCardProps> = ({
     setShowDeleteConfirm(false);
   };
 
+  const handleEditSave = async () => {
+    if (!editMessage.trim() || editMessage.trim() === post.message) {
+      setIsEditing(false);
+      setEditMessage(post.message);
+      return;
+    }
+    setIsSavingEdit(true);
+    const success = await onEditPost(post.id, editMessage);
+    setIsSavingEdit(false);
+    if (success) {
+      setIsEditing(false);
+    }
+  };
+
+  const handleEditCancel = () => {
+    setIsEditing(false);
+    setEditMessage(post.message);
+  };
+
   return (
     <article className="bg-white hover:bg-gray-50/50 p-4 sm:p-5 transition-colors duration-150 relative animate-fade-in">
       <div className="flex items-start gap-3 sm:gap-3.5">
@@ -63,7 +91,7 @@ export const PostCard: React.FC<PostCardProps> = ({
 
         {/* Content */}
         <div className="flex-1 min-w-0 space-y-2.5">
-          {/* Header: Name + Time + Admin Delete */}
+          {/* Header: Name + Time + Admin Actions */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-bold text-gray-900 text-[15px] truncate">
@@ -75,25 +103,33 @@ export const PostCard: React.FC<PostCardProps> = ({
               </span>
             </div>
 
-            {/* Admin Delete */}
-            {isAdmin && (
-              <div className="shrink-0">
+            {/* Admin Actions: Edit + Delete */}
+            {isAdmin && !isEditing && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => { setIsEditing(true); setEditMessage(post.message); }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-500 border border-blue-200/80 text-xs font-semibold transition-all"
+                  title="Edit Post"
+                >
+                  <Pencil className="w-3 h-3" />
+                  <span>Edit</span>
+                </button>
                 {!showDeleteConfirm ? (
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-500 border border-rose-200/80 text-xs font-semibold transition-all"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-500 border border-rose-200/80 text-xs font-semibold transition-all"
                     title="Delete Post"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3 h-3" />
                     <span>Delete</span>
                   </button>
                 ) : (
-                  <div className="flex items-center gap-1.5 bg-gradient-to-r from-rose-500 to-red-500 text-white rounded-full px-3.5 py-1.5 shadow-lg shadow-rose-500/25 animate-scale-in">
-                    <span className="text-xs font-bold">Delete?</span>
+                  <div className="flex items-center gap-1.5 bg-gradient-to-r from-rose-500 to-red-500 text-white rounded-full px-3 py-1.5 shadow-lg shadow-rose-500/25 animate-scale-in">
+                    <span className="text-xs font-bold">Sure?</span>
                     <button
                       onClick={handleDeleteConfirm}
                       disabled={isDeleting}
-                      className="px-2.5 py-0.5 rounded-full bg-white text-rose-600 hover:bg-rose-50 text-xs font-bold transition-colors"
+                      className="px-2 py-0.5 rounded-full bg-white text-rose-600 hover:bg-rose-50 text-xs font-bold transition-colors"
                     >
                       {isDeleting ? '...' : 'Yes'}
                     </button>
@@ -109,14 +145,48 @@ export const PostCard: React.FC<PostCardProps> = ({
             )}
           </div>
 
-          {/* Message */}
-          <p className="text-gray-800 text-[15px] leading-[1.6] break-words whitespace-pre-wrap font-normal">
-            {post.message}
-          </p>
+          {/* Message or Edit Mode */}
+          {isEditing ? (
+            <div className="space-y-2.5 animate-fade-in">
+              <textarea
+                value={editMessage}
+                onChange={(e) => setEditMessage(e.target.value)}
+                rows={3}
+                maxLength={280}
+                className="w-full px-3.5 py-2.5 bg-blue-50/50 border border-blue-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-xl text-gray-900 text-[15px] placeholder-gray-400 outline-none resize-none leading-relaxed transition-all"
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-gray-400 tabular-nums">{280 - editMessage.length} chars left</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleEditCancel}
+                    className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 active:bg-gray-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleEditSave}
+                    disabled={isSavingEdit || !editMessage.trim()}
+                    className={`px-4 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all ${
+                      isSavingEdit || !editMessage.trim()
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-sky-500 to-blue-500 text-white shadow-md shadow-blue-500/20 active:scale-95'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isSavingEdit ? 'Saving...' : 'Save'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-800 text-[15px] leading-[1.6] break-words whitespace-pre-wrap font-normal">
+              {post.message}
+            </p>
+          )}
 
           {/* Interaction Bar */}
           <div className="pt-1 flex items-center gap-1">
-            {/* Like Toggle */}
             <button
               onClick={handleLikeClick}
               className={`flex items-center gap-2 py-2 px-3 rounded-full text-[13px] font-semibold transition-all duration-200 ${
@@ -134,7 +204,6 @@ export const PostCard: React.FC<PostCardProps> = ({
               <span className="tabular-nums">{post.likes}</span>
             </button>
 
-            {/* Comment Toggle */}
             <button
               onClick={() => setShowComments(!showComments)}
               className={`flex items-center gap-2 py-2 px-3 rounded-full text-[13px] font-semibold transition-all duration-200 ${
@@ -158,6 +227,7 @@ export const PostCard: React.FC<PostCardProps> = ({
               isAdmin={isAdmin}
               onAddComment={onAddComment}
               onDeleteComment={onDeleteComment}
+              onEditComment={onEditComment}
             />
           )}
         </div>

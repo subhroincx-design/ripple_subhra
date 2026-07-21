@@ -17,6 +17,8 @@ interface FeedProps {
   onAddComment: (input: CreateCommentInput) => Promise<boolean>;
   onDeleteComment: (commentId: string, postId: string) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
+  onEditPost: (postId: string, newMessage: string) => Promise<boolean>;
+  onEditComment: (commentId: string, postId: string, newMessage: string) => Promise<boolean>;
   onFocusCreate?: () => void;
 }
 
@@ -30,18 +32,19 @@ export const Feed: React.FC<FeedProps> = ({
   onAddComment,
   onDeleteComment,
   onDelete,
+  onEditPost,
+  onEditComment,
   onFocusCreate,
 }) => {
   return (
     <div className="w-full">
-      {/* Admin Mode Banner */}
       {isAdmin && (
         <div className="bg-gradient-to-r from-emerald-50 to-green-50 border-b border-emerald-200/60 px-4 py-3 flex items-center justify-between text-xs text-emerald-800 animate-fade-in sticky top-0 lg:top-[57px] z-20">
           <div className="flex items-center gap-2.5 font-bold">
             <div className="w-6 h-6 rounded-lg bg-emerald-500 flex items-center justify-center shadow-sm">
               <ShieldCheck className="w-3.5 h-3.5 text-white" />
             </div>
-            <span>Admin Mode — Delete posts & comments</span>
+            <span>Admin Mode — Edit, delete posts & comments</span>
           </div>
           <span className="text-[10px] bg-emerald-200/60 text-emerald-800 px-2.5 py-1 rounded-full font-bold tracking-wider uppercase">
             Admin
@@ -49,7 +52,6 @@ export const Feed: React.FC<FeedProps> = ({
         </div>
       )}
 
-      {/* Feed Content */}
       {isLoading ? (
         <LoadingSkeleton />
       ) : posts.length === 0 ? (
@@ -67,6 +69,8 @@ export const Feed: React.FC<FeedProps> = ({
               onAddComment={onAddComment}
               onDeleteComment={onDeleteComment}
               onDelete={onDelete}
+              onEditPost={onEditPost}
+              onEditComment={onEditComment}
             />
           ))}
         </div>

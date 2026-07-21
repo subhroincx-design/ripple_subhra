@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { Post, CreatePostInput, Comment, CreateCommentInput, Stats, ToastMessage } from '@/types/post';
 
@@ -45,7 +45,10 @@ export function usePosts() {
   const [isPosting, setIsPosting] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Load user's liked posts from localStorage
+  // Track IDs we already added locally to prevent Realtime duplicates
+  const recentlyAddedPostIds = useRef<Set<string>>(new Set());
+  const recentlyAddedCommentIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -53,9 +56,7 @@ export function usePosts() {
       if (stored) {
         setLikedPostIds(new Set(JSON.parse(stored)));
       }
-    } catch {
-      // Ignore
-    }
+    } catch { /* ignore */ }
   }, []);
 
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -70,7 +71,6 @@ export function usePosts() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Fetch initial posts and comments from Supabase
   const fetchPosts = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -87,14 +87,12 @@ export function usePosts() {
         .order('created_at', { ascending: false });
 
       if (postsError) {
-        console.error('Error fetching posts:', postsError);
         setPosts(INITIAL_DEMO_POSTS);
         setCommentsMap(INITIAL_DEMO_COMMENTS);
       } else {
         setPosts(postsData || []);
       }
 
-      // Fetch comments from Supabase
       const { data: commentsData, error: commentsError } = await supabase
         .from('comments')
         .select('*')
@@ -116,21 +114,28 @@ export function usePosts() {
     }
   }, []);
 
-  // Realtime subscription for posts and comments
   useEffect(() => {
     fetchPosts();
 
     if (!isSupabaseConfigured) return;
 
-    const postsChannel = supabase
-      .channel('realtime_posts_comments_v5')
+    const channel = supabase
+      .channel('realtime_v6')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'posts' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newPost = payload.new as Post;
-            setPosts((prev) => (prev.some((p) => p.id === newPost.id) ? prev : [newPost, ...prev]));
+            // Skip if we already added this post locally
+            if (recentlyAddedPostIds.current.has(newPost.id)) {
+              recentlyAddedPostIds.current.delete(newPost.id);
+              return;
+            }
+            setPosts((prev) => {
+              if (prev.some((p) => p.id === newPost.id)) return prev;
+              return [newPost, ...prev];
+            });
           } else if (payload.eventType === 'UPDATE') {
             const updatedPost = payload.new as Post;
             setPosts((prev) => prev.map((p) => (p.id === updatedPost.id ? updatedPost : p)));
@@ -146,6 +151,11 @@ export function usePosts() {
         (payload) => {
           if (payload.eventType === 'INSERT') {
             const newComment = payload.new as Comment;
+            // Skip if we already added this comment locally
+            if (recentlyAddedCommentIds.current.has(newComment.id)) {
+              recentlyAddedCommentIds.current.delete(newComment.id);
+              return;
+            }
             setCommentsMap((prev) => {
               const list = prev[newComment.post_id] || [];
               if (list.some((c) => c.id === newComment.id)) return prev;
@@ -166,11 +176,11 @@ export function usePosts() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(postsChannel);
+      supabase.removeChannel(channel);
     };
   }, [fetchPosts]);
 
-  // Smart Create Post with explicit Server Feedback
+  // Create post — add once locally, skip Realtime duplicate
   const createPost = useCallback(
     async (input: CreatePostInput): Promise<boolean> => {
       const trimmedName = input.name.trim();
@@ -180,12 +190,10 @@ export function usePosts() {
         addToast('Validation Error: Please enter your name.', 'error');
         return false;
       }
-
       if (!trimmedMessage) {
         addToast('Validation Error: Message cannot be empty.', 'error');
         return false;
       }
-
       if (trimmedMessage.length > 280) {
         addToast('Validation Error: Message exceeds 280 character limit.', 'error');
         return false;
@@ -193,19 +201,17 @@ export function usePosts() {
 
       setIsPosting(true);
 
-      const tempId = `temp-${Date.now()}`;
-      const newPostObject: Post = {
-        id: tempId,
-        name: trimmedName,
-        message: trimmedMessage,
-        likes: 0,
-        created_at: new Date().toISOString(),
-      };
-
       try {
         if (!isSupabaseConfigured) {
-          setPosts((prev) => [newPostObject, ...prev]);
-          addToast('Post published locally (Supabase keys pending).', 'info');
+          const localPost: Post = {
+            id: `local-${Date.now()}`,
+            name: trimmedName,
+            message: trimmedMessage,
+            likes: 0,
+            created_at: new Date().toISOString(),
+          };
+          setPosts((prev) => [localPost, ...prev]);
+          addToast('Post published locally.', 'info');
           setIsPosting(false);
           return true;
         }
@@ -218,22 +224,22 @@ export function usePosts() {
 
         if (error) {
           console.error('Supabase post insert error:', error);
-          setPosts((prev) => [newPostObject, ...prev]);
-          addToast(`Post published locally. Server error: ${error.message}`, 'info');
-          return true;
+          addToast(`Server error: ${error.message}`, 'error');
+          return false;
         }
 
         if (data) {
-          setPosts((prev) => [data, ...prev.filter((p) => p.id !== tempId)]);
-          addToast('✅ Post published & recorded on Supabase Server!', 'success');
-          return true;
+          // Mark this ID so the Realtime handler skips it
+          recentlyAddedPostIds.current.add(data.id);
+          setPosts((prev) => [data, ...prev]);
+          addToast('✅ Post published & recorded on server!', 'success');
         }
 
         return true;
       } catch (err) {
         console.error('Error creating post:', err);
-        addToast('Post published locally.', 'info');
-        return true;
+        addToast('Failed to post. Please try again.', 'error');
+        return false;
       } finally {
         setIsPosting(false);
       }
@@ -241,7 +247,7 @@ export function usePosts() {
     [addToast]
   );
 
-  // Smart Toggle Like / Unlike with explicit Server Feedback
+  // Toggle Like / Unlike
   const toggleLike = useCallback(
     async (postId: string) => {
       const isAlreadyLiked = likedPostIds.has(postId);
@@ -253,18 +259,11 @@ export function usePosts() {
         if (typeof window !== 'undefined') {
           localStorage.setItem('ripple_liked_posts', JSON.stringify(Array.from(newLikedSet)));
         }
-
         setPosts((prev) =>
           prev.map((p) => (p.id === postId ? { ...p, likes: Math.max(0, p.likes - 1) } : p))
         );
-
         if (isSupabaseConfigured && isValidUUID(postId)) {
-          try {
-            await supabase.rpc('decrement_likes', { post_id: postId });
-            addToast('Unliked post (Synced to Server)', 'info');
-          } catch (err) {
-            console.error('Error decrementing likes:', err);
-          }
+          try { await supabase.rpc('decrement_likes', { post_id: postId }); } catch { /* ignore */ }
         }
       } else {
         newLikedSet.add(postId);
@@ -272,25 +271,18 @@ export function usePosts() {
         if (typeof window !== 'undefined') {
           localStorage.setItem('ripple_liked_posts', JSON.stringify(Array.from(newLikedSet)));
         }
-
         setPosts((prev) =>
           prev.map((p) => (p.id === postId ? { ...p, likes: p.likes + 1 } : p))
         );
-
         if (isSupabaseConfigured && isValidUUID(postId)) {
-          try {
-            await supabase.rpc('increment_likes', { post_id: postId });
-            addToast('Liked post! (Synced to Server)', 'success');
-          } catch (err) {
-            console.error('Error incrementing likes:', err);
-          }
+          try { await supabase.rpc('increment_likes', { post_id: postId }); } catch { /* ignore */ }
         }
       }
     },
-    [likedPostIds, addToast]
+    [likedPostIds]
   );
 
-  // Smart Add Comment with explicit Server Verification
+  // Add Comment — add once locally, skip Realtime duplicate
   const addComment = useCallback(
     async (input: CreateCommentInput): Promise<boolean> => {
       const trimmedName = input.name.trim();
@@ -300,72 +292,73 @@ export function usePosts() {
         addToast('Validation Error: Please enter your name.', 'error');
         return false;
       }
-
       if (!trimmedMessage) {
-        addToast('Validation Error: Comment message cannot be empty.', 'error');
+        addToast('Validation Error: Comment cannot be empty.', 'error');
         return false;
       }
-
-      const tempComment: Comment = {
-        id: `temp-comment-${Date.now()}`,
-        post_id: input.post_id,
-        name: trimmedName,
-        message: trimmedMessage,
-        created_at: new Date().toISOString(),
-      };
-
-      // Optimistic UI update
-      setCommentsMap((prev) => ({
-        ...prev,
-        [input.post_id]: [...(prev[input.post_id] || []), tempComment],
-      }));
 
       if (isSupabaseConfigured && isValidUUID(input.post_id)) {
         try {
           const { data, error } = await supabase
             .from('comments')
-            .insert([
-              {
-                post_id: input.post_id,
-                name: trimmedName,
-                message: trimmedMessage,
-              },
-            ])
+            .insert([{ post_id: input.post_id, name: trimmedName, message: trimmedMessage }])
             .select()
             .single();
 
           if (error) {
             console.error('Supabase comment insert error:', error);
-            if (error.code === '42P01') {
-              addToast('⚠️ Comments table missing on Supabase server. Run SQL script.', 'error');
-            } else {
-              addToast(`Comment added locally. Server note: ${error.message}`, 'info');
-            }
+            // Fallback: add locally
+            const localComment: Comment = {
+              id: `local-comment-${Date.now()}`,
+              post_id: input.post_id,
+              name: trimmedName,
+              message: trimmedMessage,
+              created_at: new Date().toISOString(),
+            };
+            setCommentsMap((prev) => ({
+              ...prev,
+              [input.post_id]: [...(prev[input.post_id] || []), localComment],
+            }));
+            addToast('Comment added locally.', 'info');
             return true;
           }
 
           if (data) {
+            // Mark this ID so the Realtime handler skips it
+            recentlyAddedCommentIds.current.add(data.id);
             setCommentsMap((prev) => ({
               ...prev,
-              [input.post_id]: (prev[input.post_id] || []).map((c) =>
-                c.id === tempComment.id ? data : c
-              ),
+              [input.post_id]: [...(prev[input.post_id] || []), data],
             }));
-            addToast('✅ Comment recorded on Supabase Server!', 'success');
-            return true;
+            addToast('✅ Comment recorded on server!', 'success');
           }
+          return true;
         } catch (err) {
           console.error('Unexpected error syncing comment:', err);
+          addToast('Failed to add comment.', 'error');
+          return false;
         }
       }
 
-      addToast('Comment added locally.', 'info');
+      // Local-only fallback
+      const localComment: Comment = {
+        id: `local-comment-${Date.now()}`,
+        post_id: input.post_id,
+        name: trimmedName,
+        message: trimmedMessage,
+        created_at: new Date().toISOString(),
+      };
+      setCommentsMap((prev) => ({
+        ...prev,
+        [input.post_id]: [...(prev[input.post_id] || []), localComment],
+      }));
+      addToast('Comment added!', 'success');
       return true;
     },
     [addToast]
   );
 
-  // Smart Delete Comment with explicit Server Verification
+  // Delete comment
   const deleteComment = useCallback(
     async (commentId: string, postId: string): Promise<boolean> => {
       setCommentsMap((prev) => ({
@@ -377,23 +370,20 @@ export function usePosts() {
         try {
           const { error } = await supabase.from('comments').delete().eq('id', commentId);
           if (error) {
-            addToast(`Comment deleted locally. Server note: ${error.message}`, 'info');
+            addToast(`Comment deleted locally. Server: ${error.message}`, 'info');
             return true;
           }
-          addToast('✅ Comment deleted from Supabase Server!', 'info');
+          addToast('✅ Comment deleted from server!', 'info');
           return true;
-        } catch (err) {
-          console.error('Error deleting comment:', err);
-        }
+        } catch { /* ignore */ }
       }
-
       addToast('Comment deleted.', 'info');
       return true;
     },
     [addToast]
   );
 
-  // Smart Delete Post with explicit Server Verification
+  // Delete post
   const deletePost = useCallback(
     async (postId: string): Promise<boolean> => {
       setPosts((prev) => prev.filter((p) => p.id !== postId));
@@ -402,10 +392,10 @@ export function usePosts() {
         try {
           const { error } = await supabase.from('posts').delete().eq('id', postId);
           if (error) {
-            addToast(`Post deleted locally. Server note: ${error.message}`, 'info');
+            addToast(`Post deleted locally. Server: ${error.message}`, 'info');
             return true;
           }
-          addToast('✅ Post deleted from Supabase Server!', 'info');
+          addToast('✅ Post deleted from server!', 'info');
           return true;
         } catch (err) {
           console.error('Error deleting post:', err);
@@ -414,11 +404,85 @@ export function usePosts() {
           return false;
         }
       }
-
       addToast('Post deleted.', 'info');
       return true;
     },
     [addToast, fetchPosts]
+  );
+
+  // Edit post (Admin)
+  const editPost = useCallback(
+    async (postId: string, newMessage: string): Promise<boolean> => {
+      const trimmed = newMessage.trim();
+      if (!trimmed) {
+        addToast('Message cannot be empty.', 'error');
+        return false;
+      }
+      if (trimmed.length > 280) {
+        addToast('Message exceeds 280 character limit.', 'error');
+        return false;
+      }
+
+      // Optimistic update
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, message: trimmed } : p)));
+
+      if (isSupabaseConfigured && isValidUUID(postId)) {
+        try {
+          const { error } = await supabase.from('posts').update({ message: trimmed }).eq('id', postId);
+          if (error) {
+            addToast(`Edited locally. Server: ${error.message}`, 'info');
+            return true;
+          }
+          addToast('✅ Post edited on server!', 'success');
+          return true;
+        } catch (err) {
+          console.error('Error editing post:', err);
+          addToast('Failed to edit post.', 'error');
+          return false;
+        }
+      }
+      addToast('Post edited locally.', 'info');
+      return true;
+    },
+    [addToast]
+  );
+
+  // Edit comment (Admin)
+  const editComment = useCallback(
+    async (commentId: string, postId: string, newMessage: string): Promise<boolean> => {
+      const trimmed = newMessage.trim();
+      if (!trimmed) {
+        addToast('Comment cannot be empty.', 'error');
+        return false;
+      }
+
+      // Optimistic update
+      setCommentsMap((prev) => ({
+        ...prev,
+        [postId]: (prev[postId] || []).map((c) =>
+          c.id === commentId ? { ...c, message: trimmed } : c
+        ),
+      }));
+
+      if (isSupabaseConfigured && isValidUUID(commentId)) {
+        try {
+          const { error } = await supabase.from('comments').update({ message: trimmed }).eq('id', commentId);
+          if (error) {
+            addToast(`Edited locally. Server: ${error.message}`, 'info');
+            return true;
+          }
+          addToast('✅ Comment edited on server!', 'success');
+          return true;
+        } catch (err) {
+          console.error('Error editing comment:', err);
+          addToast('Failed to edit comment.', 'error');
+          return false;
+        }
+      }
+      addToast('Comment edited locally.', 'info');
+      return true;
+    },
+    [addToast]
   );
 
   const stats: Stats = useMemo(() => {
@@ -427,7 +491,6 @@ export function usePosts() {
     const todayPosts = posts.filter(
       (p) => new Date(p.created_at).toDateString() === today
     ).length;
-
     return { totalPosts, todayPosts };
   }, [posts]);
 
@@ -446,6 +509,8 @@ export function usePosts() {
     addComment,
     deleteComment,
     deletePost,
+    editPost,
+    editComment,
     refreshPosts: fetchPosts,
   };
 }
