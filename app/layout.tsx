@@ -6,12 +6,14 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
 };
 
 export const metadata: Metadata = {
   title: 'Ripple By SUBHRA BISWAS — Microblogging Platform',
   description:
-    'Instant anonymous microblogging space created by SUBHRA BISWAS. No login, sign up, or authentication required.',
+    'Instant anonymous microblogging space created by SUBHRA BISWAS. Optimized for all devices.',
   keywords: ['Ripple', 'SUBHRA BISWAS', 'microblog', 'realtime', 'nextjs', 'supabase'],
   authors: [{ name: 'SUBHRA BISWAS' }],
 };
