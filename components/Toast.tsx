@@ -17,26 +17,25 @@ export const Toast: React.FC<ToastProps> = ({ toasts, onClose }) => {
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex items-center justify-between gap-3 p-3.5 rounded-2xl shadow-xl border backdrop-blur-md transition-all duration-300 animate-fade-in ${
+          className={`pointer-events-auto flex items-center justify-between gap-3 p-3.5 rounded-2xl shadow-xl border backdrop-blur-xl transition-all duration-300 animate-scale-in ${
             toast.type === 'success'
-              ? 'bg-gray-900/95 border-gray-800 text-white shadow-gray-950/20'
+              ? 'bg-gray-900/95 border-gray-700/50 text-white'
               : toast.type === 'error'
-              ? 'bg-rose-950/95 border-rose-800 text-white shadow-rose-950/20'
-              : 'bg-gray-900/95 border-gray-800 text-white shadow-black/30'
+              ? 'bg-rose-950/95 border-rose-700/50 text-white'
+              : 'bg-gray-900/95 border-gray-700/50 text-white'
           }`}
         >
           <div className="flex items-center gap-2.5 min-w-0">
-            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-sky-400 shrink-0" />}
+            {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
             {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />}
-            {toast.type === 'info' && <Info className="w-5 h-5 text-blue-400 shrink-0" />}
-            <span className="text-xs font-semibold text-white leading-tight truncate">
+            {toast.type === 'info' && <Info className="w-5 h-5 text-sky-400 shrink-0" />}
+            <span className="text-[13px] font-medium text-white/90 leading-snug">
               {toast.message}
             </span>
           </div>
-
           <button
             onClick={() => onClose(toast.id)}
-            className="text-gray-400 hover:text-white p-1 rounded-lg transition-colors shrink-0"
+            className="text-gray-500 hover:text-white p-1 rounded-lg transition-colors shrink-0"
             aria-label="Close notification"
           >
             <X className="w-4 h-4" />

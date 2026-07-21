@@ -34,26 +34,28 @@ export const Feed: React.FC<FeedProps> = ({
 }) => {
   return (
     <div className="w-full">
-      {/* Admin Mode Status Banner (only visible if admin mode is active) */}
+      {/* Admin Mode Banner */}
       {isAdmin && (
-        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2.5 flex items-center justify-between text-xs text-emerald-800 animate-fade-in sticky top-[57px] z-20">
-          <div className="flex items-center gap-2 font-bold">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Admin Mode Active (SUBHRA) — Delete buttons visible for posts & comments</span>
+        <div className="bg-gradient-to-r from-emerald-50 to-green-50 border-b border-emerald-200/60 px-4 py-3 flex items-center justify-between text-xs text-emerald-800 animate-fade-in sticky top-0 lg:top-[57px] z-20">
+          <div className="flex items-center gap-2.5 font-bold">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500 flex items-center justify-center shadow-sm">
+              <ShieldCheck className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span>Admin Mode — Delete posts & comments</span>
           </div>
-          <span className="text-[10px] bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full font-mono font-bold">
-            ADMIN
+          <span className="text-[10px] bg-emerald-200/60 text-emerald-800 px-2.5 py-1 rounded-full font-bold tracking-wider uppercase">
+            Admin
           </span>
         </div>
       )}
 
-      {/* Main Feed Content */}
+      {/* Feed Content */}
       {isLoading ? (
         <LoadingSkeleton />
       ) : posts.length === 0 ? (
         <EmptyState onFocusCreate={onFocusCreate} />
       ) : (
-        <div className="divide-y divide-border">
+        <div className="divide-y divide-gray-100">
           {posts.map((post) => (
             <PostCard
               key={post.id}
